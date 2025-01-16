@@ -20,32 +20,62 @@ function decodeHtmlEntities(text: string): string {
         .replace(/&#39;/g, "'");
 }
 
+function cleanAndFormatText(text: string): string {
+    return text
+        .replace(/<[^>]+>/g, '') // Remove HTML tags
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line.length > 0)
+        .join('\n');
+}
+
 function convertToLLMFormat(messages: Message[]): string {
     return messages
         .map(msg => {
             const role = msg.role === 'user' ? 'User' : 'Assistant';
             const separator = '='.repeat(48);
-
-            const parts = msg.content.split(/(<pre><code[^>]*>|<\/code><\/pre>)/);
             let formattedContent = '';
+
+            // Split content into parts based on code blocks
+            const parts = msg.content.split(/(<pre><code[^>]*>|<\/code><\/pre>)/);
 
             for (let i = 0; i < parts.length; i++) {
                 const part = parts[i];
+
                 if (part.startsWith('<pre><code')) {
+                    // Extract language if specified
                     const langMatch = part.match(/class="language-([^"]+)"/);
                     const lang = langMatch ? langMatch[1] : '';
 
+                    // Get the code content and decode HTML entities
                     const code = decodeHtmlEntities(parts[++i]);
 
-                    formattedContent += `\`\`\`${lang}\n${code.trim()}\n\`\`\`\n\n`;
+                    // Special handling for code that contains backticks
+                    const codeContent = code.trim();
+                    const backtickCount = (codeContent.match(/`/g) || []).length;
+                    const fenceLength = Math.max(3, backtickCount + 1);
+                    const fence = '`'.repeat(fenceLength);
+
+                    // Format the code block with proper indentation
+                    formattedContent += `${fence}${lang}\n${codeContent}\n${fence}\n\n`;
+
                 } else if (!part.startsWith('</code></pre>')) {
-                    formattedContent += decodeHtmlEntities(part.replace(/<[^>]+>/g, '')).trim() + '\n';
+                    // Handle regular text
+                    const cleanText = cleanAndFormatText(decodeHtmlEntities(part));
+                    if (cleanText) {
+                        formattedContent += cleanText + '\n\n';
+                    }
                 }
             }
 
-            return `${separator}\n${role}\n${separator}\n${formattedContent.trim()}\n\n`;
+            // Clean up extra whitespace while preserving intentional line breaks
+            formattedContent = formattedContent
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
+
+            return `${separator}\n${role}\n${separator}\n${formattedContent}\n`;
         })
-        .join('');
+        .join('\n');
 }
 
 function generateSummary(messages: Message[]) {
